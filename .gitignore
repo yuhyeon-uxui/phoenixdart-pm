@@ -1,0 +1,5 @@
+preview-server.out.log
+preview-server.err.log
+run_preview_server.log
+.DS_Store
+Thumbs.db
