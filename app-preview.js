@@ -11,6 +11,9 @@ const DETAIL_TABS = [
 const SORT_OPTIONS = ["마감 임박순", "추천순", "진행률 높은순", "우선순위 높은순", "이름순"];
 const TASK_STATUS_OPTIONS = ["예정", "진행중", "QA", "완료"];
 const TASK_PRIORITY_OPTIONS = ["높음", "보통", "낮음"];
+const PROJECT_CREATE_STATUS_OPTIONS = ["예정", "진행중", "QA 준비", "QA 진행중", "운영중"];
+const QA_ISSUE_STATUS_OPTIONS = ["예정", "진행중", "QA", "완료"];
+const QA_ISSUE_SEVERITY_OPTIONS = ["높음", "보통", "낮음"];
 
 const PROJECT_SEEDS = [
   ["proj-1", "사내 포털 리뉴얼", "플랫폼팀", "김지훈", "진행중", "QA 진행중", 64, 4, "내부 포털 UI와 접근성, 운영 편의성을 함께 개선하는 대표 프로젝트입니다."],
@@ -238,10 +241,65 @@ function buildActivity(projectId, owner, index) {
   ];
 }
 
+function buildIssues(projectId, issueCount, index) {
+  const count = Math.max(0, safeCount(issueCount));
+  const issueSeeds = [
+    {
+      title: "로그인 오류 재현 및 원인 파악",
+      assignee: "운영팀",
+      severity: "높음",
+      status: "진행중",
+      description: "배포 이후 로그인 예외 케이스가 반복 보고되어 원인 분석이 필요합니다.",
+      createdDate: `2026-04-${String(15 + (index % 5)).padStart(2, "0")}`,
+    },
+    {
+      title: "재검증 요청된 케이스 정리",
+      assignee: "QA팀",
+      severity: "보통",
+      status: "QA",
+      description: "수정 반영 후 다시 확인해야 하는 QA 시나리오를 정리합니다.",
+      createdDate: `2026-04-${String(17 + (index % 5)).padStart(2, "0")}`,
+    },
+    {
+      title: "배포 후 오류 로그 확인",
+      assignee: "개발팀",
+      severity: "높음",
+      status: "진행중",
+      description: "실서비스 로그를 기준으로 오류 영향 범위와 재현 경로를 확인합니다.",
+      createdDate: `2026-04-${String(19 + (index % 5)).padStart(2, "0")}`,
+    },
+  ];
+
+  return issueSeeds.slice(0, count).map((issue, issueIndex) => ({
+    id: `${projectId}-issue-${issueIndex + 1}`,
+    ...issue,
+  }));
+}
+
+function calculateProjectProgress(tasks) {
+  const total = Array.isArray(tasks) ? tasks.length : 0;
+  if (!total) return 0;
+  const completedCount = tasks.filter((task) => safeText(task.status, "") === "완료").length;
+  return Math.round((completedCount / total) * 100);
+}
+
+function withDerivedProjectFields(project) {
+  const tasks = Array.isArray(project.tasks) ? project.tasks : [];
+  const issues = Array.isArray(project.issues) ? project.issues : [];
+  return {
+    ...project,
+    tasks,
+    issues,
+    progress: calculateProjectProgress(tasks),
+    issueCount: issues.length,
+  };
+}
+
 function buildProject(seed, index) {
   const [id, name, team, owner, status, qaStatus, progress, issueCount, description] = seed;
   const tasks = buildTasks(id, owner, qaStatus, issueCount, index);
-  return {
+  const issues = buildIssues(id, issueCount, index);
+  return withDerivedProjectFields({
     id,
     name,
     team: safeText(team, "미지정"),
@@ -255,8 +313,10 @@ function buildProject(seed, index) {
     endDate: `2026-05-${String(10 + (index % 18)).padStart(2, "0")}`,
     participants: [safeText(owner, "미지정"), "QA 담당", "운영팀"],
     tasks,
+    issues,
     activity: buildActivity(id, owner, index),
-  };
+    priority: index % 3 === 0 ? "높음" : index % 3 === 1 ? "보통" : "낮음",
+  });
 }
 
 function loadProjects() {
@@ -264,6 +324,9 @@ function loadProjects() {
 }
 
 function parseRoute(pathname) {
+  if (pathname === "/projects/new") {
+    return { page: "new-project", id: null };
+  }
   const match = pathname.match(/^\/project\/([^/]+)$/);
   if (match) {
     return { page: "detail", id: decodeURIComponent(match[1]) };
@@ -605,6 +668,30 @@ function createTaskDraft() {
   };
 }
 
+function createIssueDraft() {
+  return {
+    title: "",
+    description: "",
+    assignee: "",
+    severity: "보통",
+    status: "예정",
+    createdDate: "2026-05-11",
+  };
+}
+
+function createProjectDraft() {
+  return {
+    name: "",
+    description: "",
+    team: "",
+    owner: "",
+    startDate: "",
+    endDate: "",
+    status: "예정",
+    priority: "보통",
+  };
+}
+
 function getQaChecklist(project) {
   const status = safeText(project.qaStatus, "미설정");
   return [
@@ -616,16 +703,10 @@ function getQaChecklist(project) {
 }
 
 function getIssues(project) {
-  const issueCount = Math.max(1, Math.min(3, safeCount(project.issueCount) || 1));
-  const baseIssues = [
-    { id: `${project.id}-issue-1`, title: "로그인 오류 재현 및 원인 파악", owner: "운영팀", priority: "높음", status: "진행중" },
-    { id: `${project.id}-issue-2`, title: "재검증 요청된 케이스 정리", owner: "QA팀", priority: "보통", status: "QA" },
-    { id: `${project.id}-issue-3`, title: "배포 후 오류 로그 확인", owner: "개발팀", priority: "높음", status: "진행중" },
-  ];
-  return baseIssues.slice(0, issueCount);
+  return Array.isArray(project.issues) ? project.issues : [];
 }
 
-function DashboardPage({ projects, query, statusFilter, sortOrder, onQueryChange, onStatusFilterChange, onSortOrderChange, onOpenProject }) {
+function DashboardPage({ projects, query, statusFilter, sortOrder, onQueryChange, onStatusFilterChange, onSortOrderChange, onOpenProject, onCreateProject }) {
   const filteredProjects = useMemo(() => {
     const q = query.trim().toLowerCase();
     const result = projects.filter((project) => {
@@ -701,7 +782,7 @@ function DashboardPage({ projects, query, statusFilter, sortOrder, onQueryChange
             },
             STATUS_OPTIONS.map((option) => h("option", { key: option, value: option }, option))
           ),
-          h("button", { className: "primary-action", type: "button" }, "새 프로젝트")
+          h("button", { className: "primary-action", type: "button", onClick: onCreateProject }, "새 프로젝트 등록")
         )
       )
     ),
@@ -893,15 +974,227 @@ function DashboardPage({ projects, query, statusFilter, sortOrder, onQueryChange
   );
 }
 
-function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
+function ProjectCreatePage({ onBack, onCreateProject }) {
+  const [form, setForm] = useState(createProjectDraft);
+  const [error, setError] = useState("");
+
+  const updateField = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const submitProject = () => {
+    const name = safeText(form.name, "").trim();
+    const owner = safeText(form.owner, "").trim();
+    if (!name) {
+      setError("프로젝트명은 필수입니다.");
+      return;
+    }
+    if (!owner) {
+      setError("담당자는 필수입니다.");
+      return;
+    }
+
+    onCreateProject({
+      name,
+      description: safeText(form.description, "").trim() || "프로젝트 설명이 아직 등록되지 않았습니다.",
+      team: safeText(form.team, "").trim() || "미지정",
+      owner,
+      startDate: form.startDate || "",
+      endDate: form.endDate || "",
+      status: safeText(form.status, "예정"),
+      priority: safeText(form.priority, "보통"),
+    });
+  };
+
+  return h(
+    React.Fragment,
+    null,
+    h(
+      "header",
+      { className: "global-header" },
+      h(
+        "div",
+        { className: "header-inner" },
+        h(
+          "div",
+          { className: "header-brand" },
+          h(
+            "button",
+            { className: "back-link", type: "button", onClick: onBack },
+            h(Icon, { name: "arrowLeft" }),
+            h("span", null, "목록으로")
+          ),
+          h(
+            "div",
+            null,
+            h("strong", { className: "brand-title" }, "새 프로젝트 등록"),
+            h("div", { className: "small muted" }, "운영할 프로젝트의 기본 정보를 먼저 세팅합니다.")
+          )
+        )
+      )
+    ),
+    h(
+      "main",
+      { className: "main-shell detail-shell" },
+      h(
+        "section",
+        { className: "section-card create-page-card" },
+        h(
+          "div",
+          { className: "section-head" },
+          h(
+            "div",
+            null,
+            h("h1", { className: "section-title" }, "프로젝트 생성"),
+            h("p", { className: "section-copy" }, "프로젝트명, 담당자, 기간, 상태를 먼저 설정한 뒤 이후 업무와 QA 이슈를 이어서 관리할 수 있습니다.")
+          )
+        ),
+        h(
+          "div",
+          { className: "task-form-grid create-form-grid" },
+          h(
+            "label",
+            { className: "task-form-field task-form-field-wide" },
+            h("span", { className: "small muted" }, "프로젝트명"),
+            h("input", {
+              className: "field",
+              value: form.name,
+              placeholder: "예: 고객센터 응대 시나리오 개편",
+              onChange: (event) => updateField("name", event.target.value),
+            })
+          ),
+          h(
+            "label",
+            { className: "task-form-field task-form-field-wide" },
+            h("span", { className: "small muted" }, "설명"),
+            h("textarea", {
+              className: "field task-form-textarea",
+              value: form.description,
+              placeholder: "프로젝트 목적과 현재 운영 배경을 입력하세요.",
+              onChange: (event) => updateField("description", event.target.value),
+            })
+          ),
+          h(
+            "label",
+            { className: "task-form-field" },
+            h("span", { className: "small muted" }, "담당팀"),
+            h("input", {
+              className: "field",
+              value: form.team,
+              placeholder: "예: 서비스운영팀",
+              onChange: (event) => updateField("team", event.target.value),
+            })
+          ),
+          h(
+            "label",
+            { className: "task-form-field" },
+            h("span", { className: "small muted" }, "담당자"),
+            h("input", {
+              className: "field",
+              value: form.owner,
+              placeholder: "예: 김지훈",
+              onChange: (event) => updateField("owner", event.target.value),
+            })
+          ),
+          h(
+            "label",
+            { className: "task-form-field" },
+            h("span", { className: "small muted" }, "시작일"),
+            h("input", {
+              className: "field",
+              type: "date",
+              value: form.startDate,
+              onChange: (event) => updateField("startDate", event.target.value),
+            })
+          ),
+          h(
+            "label",
+            { className: "task-form-field" },
+            h("span", { className: "small muted" }, "종료일"),
+            h("input", {
+              className: "field",
+              type: "date",
+              value: form.endDate,
+              onChange: (event) => updateField("endDate", event.target.value),
+            })
+          ),
+          h(
+            "div",
+            { className: "task-form-field task-form-field-wide" },
+            h("span", { className: "small muted" }, "상태"),
+            h(
+              "div",
+              { className: "status-chip-group", role: "group", "aria-label": "프로젝트 상태 선택" },
+              PROJECT_CREATE_STATUS_OPTIONS.map((option) =>
+                h(
+                  "button",
+                  {
+                    key: option,
+                    type: "button",
+                    className: `status-chip status-chip-${statusClassName(option)}${form.status === option ? " is-active" : ""}`,
+                    "aria-pressed": form.status === option ? "true" : "false",
+                    onClick: () => updateField("status", option),
+                  },
+                  option
+                )
+              )
+            )
+          ),
+          h(
+            "div",
+            { className: "task-form-field task-form-field-wide" },
+            h("span", { className: "small muted" }, "우선순위"),
+            h(
+              "div",
+              { className: "priority-chip-group", role: "group", "aria-label": "프로젝트 우선순위 선택" },
+              TASK_PRIORITY_OPTIONS.map((option) =>
+                h(
+                  "button",
+                  {
+                    key: option,
+                    type: "button",
+                    className: `priority-chip priority-chip-${priorityClassName(option)}${form.priority === option ? " is-active" : ""}`,
+                    "aria-pressed": form.priority === option ? "true" : "false",
+                    onClick: () => updateField("priority", option),
+                  },
+                  option
+                )
+              )
+            )
+          )
+        ),
+        error ? h("div", { className: "task-form-error" }, error) : null,
+        h(
+          "div",
+          { className: "task-form-actions" },
+          h(
+            "button",
+            { type: "button", className: "ghost-action subtle-action", onClick: onBack },
+            "취소"
+          ),
+          h(
+            "button",
+            { type: "button", className: "primary-action task-submit-button", onClick: submitProject },
+            "프로젝트 생성"
+          )
+        )
+      )
+    )
+  );
+}
+
+function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask, onAddIssue }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [taskView, setTaskView] = useState("list");
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [showIssueForm, setShowIssueForm] = useState(false);
   const [showQaChecklist, setShowQaChecklist] = useState(true);
   const [openTaskStatusMenuId, setOpenTaskStatusMenuId] = useState(null);
   const [roadmapQuery, setRoadmapQuery] = useState("");
   const [taskForm, setTaskForm] = useState(createTaskDraft);
+  const [issueForm, setIssueForm] = useState(createIssueDraft);
   const [taskError, setTaskError] = useState("");
+  const [issueError, setIssueError] = useState("");
 
   const issues = useMemo(() => getIssues(project), [project]);
   const qaChecklist = useMemo(() => getQaChecklist(project), [project]);
@@ -923,6 +1216,10 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
 
   const updateTaskForm = (field, value) => {
     setTaskForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const updateIssueForm = (field, value) => {
+    setIssueForm((prev) => ({ ...prev, [field]: value }));
   };
 
   const submitTask = () => {
@@ -950,6 +1247,27 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
     setTaskForm(createTaskDraft());
     setTaskError("");
     setShowTaskForm(false);
+  };
+
+  const submitIssue = () => {
+    const title = safeText(issueForm.title, "").trim();
+    if (!title) {
+      setIssueError("이슈 제목은 필수입니다.");
+      return;
+    }
+
+    onAddIssue(project.id, {
+      title,
+      description: safeText(issueForm.description, "").trim(),
+      assignee: safeText(issueForm.assignee, "").trim() || "미지정",
+      severity: safeText(issueForm.severity, "보통"),
+      status: safeText(issueForm.status, "예정"),
+      createdDate: issueForm.createdDate || "2026-05-11",
+    });
+
+    setIssueForm(createIssueDraft());
+    setIssueError("");
+    setShowIssueForm(false);
   };
 
   const renderTaskStatusPicker = (task, variant = "list") =>
@@ -1271,9 +1589,9 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
                 { className: "detail-list-main task-list-main" },
                 h(
                   "div",
-                  { className: "task-list-top" },
+                  { className: "task-list-top task-list-top-left" },
                   h("span", { className: `priority-tag priority-${priorityClassName(task.priority)}` }, `우선순위: ${safeText(task.priority, "보통")}`),
-                  renderTaskStatusPicker(task, "list")
+                  renderTaskStatusPicker(task, "list-inline")
                 ),
                 h("strong", null, task.title),
                 h("div", { className: "small muted" }, `${safeText(task.assignee, "미지정")} · ${formatDate(task.dueDate)}`),
@@ -1289,7 +1607,14 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
           h("p", { className: "section-copy section-copy-compact" }, "업무를 추가해 프로젝트 실행 계획을 시작하세요."),
           h(
             "button",
-            { type: "button", className: "ghost-action subtle-action" },
+            {
+              type: "button",
+              className: "ghost-action subtle-action",
+              onClick: () => {
+                setShowTaskForm(true);
+                setTaskError("");
+              },
+            },
             h(Icon, { name: "plus" }),
             h("span", null, "작업 추가")
           )
@@ -1320,8 +1645,7 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
                       "div",
                       { className: "task-list-top kanban-card-top" },
                       h("span", { className: `priority-tag priority-${priorityClassName(task.priority)}` }, `우선순위: ${safeText(task.priority, "보통")}`),
-                      renderTaskStatusPicker(task, "kanban")
-                    ),
+                                          ),
                     h("strong", null, task.title),
                     h("div", { className: "small muted" }, safeText(task.assignee, "미지정")),
                     task.dueDate ? h("div", { className: "small muted" }, formatDate(task.dueDate)) : null
@@ -1510,6 +1834,153 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
     );
   
 } else if (activeTab === "qa") {
+    const qaIssueModal =
+      showIssueForm
+        ? h(
+            "div",
+            {
+              className: "task-modal-backdrop",
+              onClick: () => {
+                setShowIssueForm(false);
+                setIssueError("");
+                setIssueForm(createIssueDraft());
+              },
+            },
+            h(
+              "div",
+              {
+                className: "task-modal-card",
+                onClick: (event) => event.stopPropagation(),
+              },
+              h(
+                "div",
+                { className: "section-head" },
+                h(
+                  "div",
+                  null,
+                  h("h2", { className: "section-title section-title-compact" }, "QA 이슈 추가"),
+                  h("p", { className: "section-copy section-copy-compact" }, "이슈를 등록하면 QA 목록과 오픈 이슈 수에 바로 반영됩니다.")
+                )
+              ),
+              h(
+                "div",
+                { className: "task-form-grid" },
+                h(
+                  "label",
+                  { className: "task-form-field task-form-field-wide" },
+                  h("span", { className: "small muted" }, "이슈 제목"),
+                  h("input", {
+                    className: "field",
+                    value: issueForm.title,
+                    placeholder: "예: 배포 후 쿠폰 발급 실패",
+                    onChange: (event) => updateIssueForm("title", event.target.value),
+                  })
+                ),
+                h(
+                  "label",
+                  { className: "task-form-field" },
+                  h("span", { className: "small muted" }, "담당자"),
+                  h("input", {
+                    className: "field",
+                    value: issueForm.assignee,
+                    placeholder: "선택 사항",
+                    onChange: (event) => updateIssueForm("assignee", event.target.value),
+                  })
+                ),
+                h(
+                  "label",
+                  { className: "task-form-field" },
+                  h("span", { className: "small muted" }, "등록일"),
+                  h("input", {
+                    className: "field",
+                    type: "date",
+                    value: issueForm.createdDate,
+                    onChange: (event) => updateIssueForm("createdDate", event.target.value),
+                  })
+                ),
+                h(
+                  "div",
+                  { className: "task-form-field" },
+                  h("span", { className: "small muted" }, "상태"),
+                  h(
+                    "div",
+                    { className: "status-chip-group", role: "group", "aria-label": "이슈 상태 선택" },
+                    QA_ISSUE_STATUS_OPTIONS.map((option) =>
+                      h(
+                        "button",
+                        {
+                          key: option,
+                          type: "button",
+                          className: `status-chip status-chip-${statusClassName(option)}${issueForm.status === option ? " is-active" : ""}`,
+                          "aria-pressed": issueForm.status === option ? "true" : "false",
+                          onClick: () => updateIssueForm("status", option),
+                        },
+                        option
+                      )
+                    )
+                  )
+                ),
+                h(
+                  "div",
+                  { className: "task-form-field" },
+                  h("span", { className: "small muted" }, "심각도"),
+                  h(
+                    "div",
+                    { className: "priority-chip-group", role: "group", "aria-label": "이슈 심각도 선택" },
+                    QA_ISSUE_SEVERITY_OPTIONS.map((option) =>
+                      h(
+                        "button",
+                        {
+                          key: option,
+                          type: "button",
+                          className: `priority-chip priority-chip-${priorityClassName(option)}${issueForm.severity === option ? " is-active" : ""}`,
+                          "aria-pressed": issueForm.severity === option ? "true" : "false",
+                          onClick: () => updateIssueForm("severity", option),
+                        },
+                        option
+                      )
+                    )
+                  )
+                ),
+                h(
+                  "label",
+                  { className: "task-form-field task-form-field-wide" },
+                  h("span", { className: "small muted" }, "설명"),
+                  h("textarea", {
+                    className: "field task-form-textarea",
+                    value: issueForm.description,
+                    placeholder: "재현 경로, 영향 범위, 필요한 대응 내용을 입력하세요.",
+                    onChange: (event) => updateIssueForm("description", event.target.value),
+                  })
+                )
+              ),
+              issueError ? h("div", { className: "task-form-error" }, issueError) : null,
+              h(
+                "div",
+                { className: "task-form-actions" },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "ghost-action subtle-action",
+                    onClick: () => {
+                      setShowIssueForm(false);
+                      setIssueError("");
+                      setIssueForm(createIssueDraft());
+                    },
+                  },
+                  "취소"
+                ),
+                h(
+                  "button",
+                  { type: "button", className: "primary-action task-submit-button", onClick: submitIssue },
+                  "QA 이슈 추가"
+                )
+              )
+            )
+          )
+        : null;
+
     const issuesContent = issues.length
       ? h(
           "div",
@@ -1518,20 +1989,21 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
             h(
               "article",
               { key: issue.id, className: "detail-list-row issue-list-row" },
-              h(
-                "div",
-                { className: "detail-list-main task-list-main" },
                 h(
                   "div",
-                  { className: "task-list-top" },
-                  h("span", { className: `priority-tag priority-${priorityClassName(issue.priority)}` }, `우선순위: ${safeText(issue.priority, "보통")}`),
-                  h("span", { className: `badge badge-${statusClassName(issue.status)}` }, issue.status)
-                ),
-                h("strong", null, issue.title),
-                h("div", { className: "small muted" }, `${issue.owner} · 오픈 이슈 ${safeCount(project.issueCount)}건`)
+                  { className: "detail-list-main task-list-main" },
+                  h(
+                    "div",
+                    { className: "task-list-top" },
+                    h("span", { className: `priority-tag priority-${priorityClassName(issue.severity)}` }, `우선순위: ${safeText(issue.severity, "보통")}`),
+                    h("span", { className: `badge badge-${statusClassName(issue.status)}` }, issue.status)
+                  ),
+                  h("strong", null, issue.title),
+                  h("div", { className: "small muted" }, `${safeText(issue.assignee, "미지정")} · ${formatDate(issue.createdDate)}`),
+                  issue.description ? h("div", { className: "small muted" }, issue.description) : null
+                )
               )
             )
-          )
         )
       : h(
           "div",
@@ -1540,9 +2012,16 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
           h("p", { className: "section-copy section-copy-compact" }, "새 이슈를 등록해 QA 대응 흐름을 시작하세요."),
           h(
             "button",
-            { type: "button", className: "ghost-action subtle-action" },
+            {
+              type: "button",
+              className: "ghost-action subtle-action",
+              onClick: () => {
+                setShowIssueForm(true);
+                setIssueError("");
+              },
+            },
             h(Icon, { name: "plus" }),
-            h("span", null, "이슈 등록")
+            h("span", null, "QA 이슈 추가")
           )
         );
 
@@ -1563,9 +2042,16 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
           ),
           h(
             "button",
-            { type: "button", className: "ghost-action subtle-action" },
+            {
+              type: "button",
+              className: "ghost-action subtle-action",
+              onClick: () => {
+                setShowIssueForm(true);
+                setIssueError("");
+              },
+            },
             h(Icon, { name: "plus" }),
-            h("span", null, "이슈 등록")
+            h("span", null, "QA 이슈 추가")
           )
         ),
         issuesContent
@@ -1624,6 +2110,7 @@ function ProjectDetailPage({ project, onBack, onAddTask, onUpdateTask }) {
         )
       )
     );
+    mainContent = h(React.Fragment, null, mainContent, qaIssueModal);
   }
 
   return h(
@@ -1860,6 +2347,36 @@ function App() {
   const [sortOrder, setSortOrder] = useState("마감 임박순");
   const [projects, setProjects] = useState(() => loadProjects());
 
+  const createProject = (projectData) => {
+    const projectId = `proj-${Date.now()}`;
+    const nextProject = withDerivedProjectFields({
+      id: projectId,
+      name: safeText(projectData.name, "새 프로젝트"),
+      description: safeText(projectData.description, "-"),
+      team: safeText(projectData.team, "미지정"),
+      owner: safeText(projectData.owner, "미지정"),
+      status: safeText(projectData.status, "예정"),
+      qaStatus: projectData.status === "QA 진행중" ? "테스트 중" : projectData.status === "QA 준비" ? "테스트 전" : "미설정",
+      startDate: projectData.startDate || "",
+      endDate: projectData.endDate || "",
+      participants: [safeText(projectData.owner, "미지정"), "QA 담당", "운영팀"],
+      tasks: [],
+      issues: [],
+      activity: [
+        {
+          id: `${projectId}-activity-created`,
+          actor: safeText(projectData.owner, "미지정"),
+          message: "프로젝트가 생성되었습니다.",
+          timestamp: "2026-05-11T09:30:00",
+        },
+      ],
+      priority: safeText(projectData.priority, "보통"),
+    });
+
+    setProjects((prev) => [nextProject, ...prev]);
+    navigateTo(`/project/${projectId}`);
+  };
+
   const addTaskToProject = (projectId, taskData) => {
     setProjects((prev) =>
       prev.map((project) => {
@@ -1875,10 +2392,10 @@ function App() {
           startDate: taskData.startDate || "",
           memo: safeText(taskData.description, "").trim(),
         };
-        return {
+        return withDerivedProjectFields({
           ...project,
           tasks: [nextTask, ...project.tasks],
-        };
+        });
       })
     );
   };
@@ -1887,7 +2404,7 @@ function App() {
     setProjects((prev) =>
       prev.map((project) => {
         if (project.id !== projectId) return project;
-        return {
+        return withDerivedProjectFields({
           ...project,
           tasks: project.tasks.map((task) =>
             task.id === taskId
@@ -1898,7 +2415,38 @@ function App() {
                 }
               : task
           ),
+        });
+      })
+    );
+  };
+
+  const addIssueToProject = (projectId, issueData) => {
+    setProjects((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project;
+        const nextIssue = {
+          id: `${projectId}-issue-${Date.now()}`,
+          title: safeText(issueData.title, "새 이슈"),
+          description: safeText(issueData.description, "").trim(),
+          assignee: safeText(issueData.assignee, "미지정"),
+          severity: safeText(issueData.severity, "보통"),
+          status: safeText(issueData.status, "예정"),
+          createdDate: issueData.createdDate || "2026-05-11",
         };
+
+        return withDerivedProjectFields({
+          ...project,
+          issues: [nextIssue, ...(Array.isArray(project.issues) ? project.issues : [])],
+          activity: [
+            {
+              id: `${projectId}-activity-issue-${Date.now()}`,
+              actor: nextIssue.assignee,
+              message: `${nextIssue.title} 이슈가 등록되었습니다.`,
+              timestamp: `${nextIssue.createdDate || "2026-05-11"}T10:00:00`,
+            },
+            ...project.activity,
+          ],
+        });
       })
     );
   };
@@ -1924,7 +2472,13 @@ function App() {
           onBack: () => navigateTo("/"),
           onAddTask: addTaskToProject,
           onUpdateTask: updateTaskInProject,
+          onAddIssue: addIssueToProject,
         })
+      : route.page === "new-project"
+        ? h(ProjectCreatePage, {
+            onBack: () => navigateTo("/"),
+            onCreateProject: createProject,
+          })
       : h(DashboardPage, {
           projects,
           query,
@@ -1934,6 +2488,7 @@ function App() {
           onStatusFilterChange: setStatusFilter,
           onSortOrderChange: setSortOrder,
           onOpenProject: (projectId) => navigateTo(`/project/${projectId}`),
+          onCreateProject: () => navigateTo("/projects/new"),
         })
   );
 }

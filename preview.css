@@ -459,6 +459,8 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: fit-content;
+  max-width: max-content;
   padding: 6px 12px;
   border-radius: 999px;
   font-size: 13px;
@@ -1457,7 +1459,8 @@ button {
 
 .task-list-main {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  justify-items: start;
 }
 
 .task-list-top {
@@ -1465,6 +1468,28 @@ button {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+}
+
+.task-list-top-left {
+  justify-content: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-list-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  padding-top: 22px;
+  padding-bottom: 22px;
+}
+
+.task-list-row .detail-list-main strong {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.task-list-row .detail-list-main .small {
+  margin-top: 0;
 }
 
 .task-status-picker {
@@ -1491,6 +1516,21 @@ button {
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
+}
+
+.task-list-top-left .task-status-picker {
+  justify-content: flex-start;
+}
+
+.task-list-top-left .status-chip-trigger {
+  min-width: 92px;
+  justify-content: center;
+}
+
+.task-list-main .priority-tag,
+.kanban-card .priority-tag {
+  justify-self: start;
+  align-self: start;
 }
 
 .qa-status-panel {
@@ -1621,6 +1661,15 @@ button {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.create-page-card {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.create-form-grid {
+  margin-top: 6px;
 }
 
 .task-form-field {
