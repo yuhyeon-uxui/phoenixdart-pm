@@ -324,8 +324,14 @@ function loadProjects() {
 }
 
 function parseRoute(pathname) {
+  if (pathname === "/projects") {
+    return { page: "projects", id: null };
+  }
   if (pathname === "/projects/new") {
     return { page: "new-project", id: null };
+  }
+  if (pathname === "/inbox") {
+    return { page: "inbox", id: null };
   }
   const match = pathname.match(/^\/project\/([^/]+)$/);
   if (match) {
@@ -379,6 +385,53 @@ function getRecentActivity(projects) {
     )
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
     .slice(0, 3);
+}
+
+function getInboxSections(projects) {
+  const pendingProjects = projects
+    .filter((project) => ["진행중", "QA 준비", "QA 진행중"].includes(safeText(project.status, "")))
+    .slice(0, 5)
+    .map((project) => ({
+      id: `${project.id}-confirm`,
+      projectId: project.id,
+      title: project.name,
+      meta: `${safeText(project.owner, "미지정")} · ${safeText(project.status, "예정")}`,
+      badge: "확인 필요",
+      tone: "qa",
+    }));
+
+  const etaPending = projects
+    .flatMap((project) =>
+      project.tasks
+        .filter((task) => safeText(task.status, "") === "예정")
+        .map((task) => ({
+          id: `${project.id}-${task.id}-eta`,
+          projectId: project.id,
+          title: task.title,
+          meta: `${project.name} · ${safeText(task.assignee, "미지정")}`,
+          badge: "일정 회신",
+          tone: "planned",
+        }))
+    )
+    .slice(0, 5);
+
+  const qaRequests = projects
+    .filter((project) => ["테스트 중", "재검증 중", "이슈 수정 중"].includes(safeText(project.qaStatus, "")))
+    .slice(0, 5)
+    .map((project) => ({
+      id: `${project.id}-qa`,
+      projectId: project.id,
+      title: project.name,
+      meta: `QA 상태 · ${safeText(project.qaStatus, "미설정")}`,
+      badge: "QA 확인",
+      tone: "qa",
+    }));
+
+  return [
+    { key: "confirm", title: "내가 확인해야 하는 프로젝트", copy: "다음 단계 전달을 확인해야 하는 프로젝트입니다.", items: pendingProjects },
+    { key: "eta", title: "일정 회신이 필요한 업무", copy: "예상 일정 회신이 필요한 항목입니다.", items: etaPending },
+    { key: "qa", title: "QA 확인 요청", copy: "QA 또는 재검증 대응이 필요한 프로젝트입니다.", items: qaRequests },
+  ];
 }
 
 function getProjectPriorityScore(project) {
@@ -966,6 +1019,101 @@ function DashboardPage({ projects, query, statusFilter, sortOrder, onQueryChange
                   )
                 )
               )
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+function InboxPage({ projects, onBack, onOpenProject }) {
+  const sections = useMemo(() => getInboxSections(projects), [projects]);
+
+  return h(
+    React.Fragment,
+    null,
+    h(
+      "header",
+      { className: "global-header" },
+      h(
+        "div",
+        { className: "header-inner" },
+        h(
+          "div",
+          { className: "header-brand" },
+          h(
+            "button",
+            { className: "back-link", type: "button", onClick: onBack },
+            h(Icon, { name: "arrowLeft" }),
+            h("span", null, "대시보드로")
+          ),
+          h(
+            "div",
+            null,
+            h("strong", { className: "brand-title" }, "확인 / 전달 대기함"),
+            h("div", { className: "small muted" }, "각 팀이 지금 바로 처리해야 할 확인과 일정 회신 항목을 모았습니다.")
+          )
+        )
+      )
+    ),
+    h(
+      "main",
+      { className: "main-shell detail-shell" },
+      h(
+        "section",
+        { className: "section-card" },
+        h(
+          "div",
+          { className: "section-head" },
+          h(
+            "div",
+            null,
+            h("h1", { className: "section-title" }, "오늘 확인해야 할 항목"),
+            h("p", { className: "section-copy" }, "전달 확인, 일정 회신, QA 확인 요청을 우선순위 기준으로 빠르게 확인합니다.")
+          )
+        ),
+        h(
+          "div",
+          { className: "detail-grid" },
+          sections.map((section) =>
+            h(
+              "section",
+              { key: section.key, className: "section-card detail-side-card" },
+              h(
+                "div",
+                { className: "section-head section-head-compact" },
+                h(
+                  "div",
+                  null,
+                  h("h2", { className: "section-title section-title-compact" }, section.title),
+                  h("p", { className: "section-copy section-copy-compact" }, section.copy)
+                )
+              ),
+              section.items.length
+                ? h(
+                    "div",
+                    { className: "detail-list" },
+                    section.items.map((item) =>
+                      h(
+                        "button",
+                        {
+                          key: item.id,
+                          type: "button",
+                          className: "detail-list-row inbox-row",
+                          onClick: () => onOpenProject(item.projectId),
+                        },
+                        h(
+                          "div",
+                          { className: "detail-list-main" },
+                          h("strong", null, item.title),
+                          h("div", { className: "small muted" }, item.meta)
+                        ),
+                        h("span", { className: `badge badge-${item.tone}` }, item.badge)
+                      )
+                    )
+                  )
+                : h("div", { className: "empty-inline-state" }, h("strong", null, "대기 중인 항목이 없습니다."))
             )
           )
         )
@@ -2474,6 +2622,12 @@ function App() {
           onUpdateTask: updateTaskInProject,
           onAddIssue: addIssueToProject,
         })
+      : route.page === "inbox"
+        ? h(InboxPage, {
+            projects,
+            onBack: () => navigateTo("/"),
+            onOpenProject: (projectId) => navigateTo(`/project/${projectId}`),
+          })
       : route.page === "new-project"
         ? h(ProjectCreatePage, {
             onBack: () => navigateTo("/"),
